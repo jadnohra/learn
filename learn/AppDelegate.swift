@@ -2,14 +2,13 @@
 //  AppDelegate.swift
 //  learn
 //
-//  Created by Jad Nohra on 16/09/15.
+//  Created by Jad Nohra on 13/09/15.
 //  Copyright (c) 2015 Jad Nohra. All rights reserved.
 //
 
 
 import Cocoa
 import SpriteKit
-
 extension SKNode {
     class func unarchiveFromFile(file : String) -> SKNode? {
         if let path = NSBundle.mainBundle().pathForResource(file, ofType: "sks") {
@@ -24,6 +23,12 @@ extension SKNode {
             return nil
         }
     }
+}
+
+class MyWindow: NSWindow {
+}
+
+class MyView: SKView {
 }
 
 @NSApplicationMain
@@ -45,10 +50,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             self.skView!.showsFPS = true
             self.skView!.showsNodeCount = true
+            self.skView!.frameInterval = 2
+            
+            self.window.acceptsMouseMovedEvents = true
         }
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(sender: NSApplication) -> Bool {
         return true
     }
+    
+    func applicationShouldTerminate(sender: NSApplication) -> NSApplicationTerminateReply {
+        (self.skView.scene as! GameScene).write()
+        return .TerminateNow
+    }
+    
 }
