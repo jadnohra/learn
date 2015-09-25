@@ -19,12 +19,17 @@ class PreRelInfo {
     var to: String = ""
     var resolved: Bool = false
 }
-class RelInfo {
+class RelInfo: Equatable {
+    var id : Int = 0
     var from :LrnEntity = LrnEntity()
     var to :LrnEntity = LrnEntity()
     var node :SKShapeNode = SKShapeNode()
 }
-class LrnEntity {
+func ==(lhs: RelInfo, rhs: RelInfo) -> Bool
+{
+    return lhs.id == rhs.id
+}
+class LrnEntity: Equatable {
     var id : Int = 0
     var fn : String = ""
     var fp : String = ""
@@ -39,16 +44,20 @@ class LrnEntity {
     var text : String = ""
     var fntName : String = "PilGI"
     var fntSize: CGFloat = 14.0
+    var fntColName : String = "black"
     var fntCol: NSColor = NSColor.blackColor()
 }
-class Note {
-    var txt : String = "test"
-    var node : SKLabelNode = SKLabelNode()
+func ==(lhs: LrnEntity, rhs: LrnEntity) -> Bool
+{
+    return lhs.id == rhs.id
 }
 class GameScene: SKScene {
     var dirPath = ""
+    var sdirPath = ""
     let fntNames = ["PilGI", "Arial", "Deutsche Zierschrift"]
+    let colNames = ["black":NSColor.blackColor(), "red":NSColor.redColor(), "magenta":NSColor.magentaColor(), "green":NSColor.greenColor(), "blue":NSColor.blueColor()]
     var id_gen :Int = 1
+    var rel_id_gen: Int = 1
     var rroot : SKNode = SKNode()
     var root : SKNode = SKNode()
     var sel : SKNode = SKNode()
@@ -57,12 +66,14 @@ class GameScene: SKScene {
     var entities = Array<LrnEntity>()
     var entities_by_fn = Dictionary<String, LrnEntity>()
     var state : String = ""
-    var note : Note = Note()
     var auto_note_index = 1
+    var auto_paste_index = 1
     var last_mouse_evt = NSEvent()
     var time : CFTimeInterval = CFTimeInterval()
     var last_evt_time : CFTimeInterval = CFTimeInterval()
+    var fcs_cpy : SKNode = SKNode()
     func write() {
+        let dp = sdirPath
         for ent in entities {
             var cfg = ""
             cfg = cfg + String(format: "pos.x\n%f\n", Float(ent.node.position.x))
@@ -70,29 +81,38 @@ class GameScene: SKScene {
             cfg = cfg + String(format: "scl\n%f\n", Float(ent.scl))
             cfg = cfg + String(format: "fntSize\n%f\n", Float(ent.fntSize))
             cfg = cfg + "fntName\n" + ent.fntName + "\n"
-            cfg = cfg + "fntCol\n" + (ent.fntCol == NSColor.blackColor() ? "black":"red") + "\n"
+            cfg = cfg + "fntCol\n" + ent.fntColName + "\n"
             for rel in ent.rel {
                 if rel.from.fn == ent.fn {
                     cfg = cfg + "rel_to\n" + rel.to.fn + "\n"
                 }
             }
-            let dp = dirPath.stringByAppendingPathComponent("state")
-            NSFileManager.defaultManager().createDirectoryAtPath(dp, withIntermediateDirectories: false, attributes: nil, error: nil)
             let fp = dp.stringByAppendingPathComponent("_" + ent.fn + ".lrn")
+            cfg.writeToFile(fp, atomically: false, encoding: NSUTF8StringEncoding, error: nil)
+        }
+        if (true)
+        {
+            var cfg = ""
+            cfg = cfg + String(format: "pos.x\n%f\n", Float(root.position.x))
+            cfg = cfg + String(format: "pos.y\n%f\n", Float(root.position.y))
+            cfg = cfg + String(format: "scl\n%f\n", Float(root.xScale))
+            let fp = dp.stringByAppendingPathComponent("state_root.lrn")
             cfg.writeToFile(fp, atomically: false, encoding: NSUTF8StringEncoding, error: nil);
         }
     }
-    func createTextTexture(text: NSString, fntName: String, fntSize: CGFloat = 14.0, fntCol: NSColor = NSColor.blackColor()) -> SKTexture{
+    func createTextTexture(_text: NSString, fntName: String, fntSize: CGFloat = 14.0, fntCol: NSColor = NSColor.blackColor()) -> SKTexture{
         let font = NSFont(name: fntName, size: fntSize)
         let textAttributes: [String: AnyObject] =
         [    NSForegroundColorAttributeName : fntCol as AnyObject,
             NSFontAttributeName : font as! AnyObject
         ]
+        let text = " " + _text.stringByReplacingOccurrencesOfString("\n", withString: " \n ") + " "
         let sz = text.sizeWithAttributes(textAttributes)
         let nsi:NSImage = NSImage(size: sz)
         nsi.lockFocus()
         NSColor.whiteColor().setFill()
-        NSBezierPath.fillRect(NSRect(x: 0,y: 0,width: sz.width,height: sz.height))
+        //NSBezierPath.fillRect(NSRect(x: 0,y: 0,width: sz.width,height: sz.height))
+        NSBezierPath.strokeRect(NSRect(x: 0,y: 0,width: sz.width,height: sz.height))
         text.drawInRect(NSRect(x: 0,y: 0,width: sz.width,height: sz.height), withAttributes:textAttributes)
         nsi.unlockFocus()
         return SKTexture(image:nsi)
@@ -123,6 +143,12 @@ class GameScene: SKScene {
             (ent.node as! SKSpriteNode).texture = tex
         }
     }
+    func fixText(txt: String) -> String {
+        if txt.hasSuffix("\n") {
+            return dropLast(txt)
+        }
+        return txt
+    }
     func updateLrnEntityFromFile(fn: String, ent: LrnEntity) {
         if ent.type == "image" {
             let fp = dirPath.stringByAppendingPathComponent(fn)
@@ -133,8 +159,9 @@ class GameScene: SKScene {
             
         } else {
             let fp = dirPath.stringByAppendingPathComponent(fn)
-            let txt = NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding, error: nil) as! String
-            let tex = createTextTexture(txt, fntName: ent.fntName, fntSize: ent.fntSize, fntCol: ent.fntCol)
+            let txt = fixText(NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding, error: nil) as! String)
+            ent.text = txt
+            let tex = createTextTexture(ent.text, fntName: ent.fntName, fntSize: ent.fntSize, fntCol: ent.fntCol)
             (ent.node as! SKSpriteNode).size = tex.size()
             (ent.node as! SKSpriteNode).texture = tex
         }
@@ -166,7 +193,13 @@ class GameScene: SKScene {
                         } else if (key == "fntName") {
                             ent.fntName = line
                         } else if (key == "fntCol") {
-                            ent.fntCol = line == "red" ? NSColor.redColor() : NSColor.blackColor()
+                            if let colVal = self.colNames[line] {
+                                ent.fntColName = line
+                                ent.fntCol = self.colNames[ent.fntColName]!
+                            } else {
+                                ent.fntColName = line
+                                ent.fntCol = self.colNames["black"]!
+                            }
                         } else if (key == "rel_to") {
                             var pri = PreRelInfo(); pri.to = line; pri.resolved = false;
                             ent.load_rel_to.append(pri)
@@ -182,12 +215,16 @@ class GameScene: SKScene {
             let tex = SKTexture(image: img!)
             let sprite = SKSpriteNode(texture: tex)
             ent.fn = fn; ent.fp = fp; ent.node = sprite; ent.type = "image";
+            if (fn.hasPrefix("paste_")) {
+                let num = fn.componentsSeparatedByString("_")[1].componentsSeparatedByString(".")[0].toInt()
+                if num >= self.auto_paste_index { self.auto_paste_index = num! + 1}
+            }
         } else if fn.hasSuffix("txt") && (fn.rangeOfString("ocr") == nil) {
             let fp = dirPath.stringByAppendingPathComponent(fn)
             let txt = NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding, error: nil) as! String
-            let sprite = SKSpriteNode(texture: createTextTexture(txt, fntName: ent.fntName, fntSize: ent.fntSize, fntCol: ent.fntCol))
+            ent.text = fixText(txt);
+            let sprite = SKSpriteNode(texture: createTextTexture(ent.text, fntName: ent.fntName, fntSize: ent.fntSize, fntCol: ent.fntCol))
             ent.fn = fn; ent.fp = fp; ent.node = sprite; ent.type = "text";
-            ent.text = txt;
             if (fn.hasPrefix("auto_note")) {
                 let num = fn.componentsSeparatedByString("_")[2].componentsSeparatedByString(".")[0].toInt()
                 if num >= self.auto_note_index { self.auto_note_index = num! + 1}
@@ -201,7 +238,7 @@ class GameScene: SKScene {
             ent.id = id_gen; id_gen++;
             ent.node.position = pos
             ent.node.setScale(ent.scl)
-            ent.node.zRotation = CGFloat(randf2(-0.015, 0.015))
+            //ent.node.zRotation = CGFloat(randf2(-0.01, 0.01))
             ent.node.name = ent.fn
             self.entities.append(ent)
             self.entities_by_fn[ent.fn] = ent
@@ -264,12 +301,21 @@ class GameScene: SKScene {
                         }
                         if img_rep is NSBitmapImageRep {
                             let data = (img_rep as! NSBitmapImageRep).representationUsingType(NSBitmapImageFileType.NSPNGFileType, properties: [:]) as NSData?
+                            /*
                             let df = NSDateFormatter()
                             df.dateStyle = .ShortStyle
                             df.timeStyle = .ShortStyle
                             let date = NSDate()
                             let date_str = df.stringFromDate(date).stringByReplacingOccurrencesOfString("/", withString: "-").stringByReplacingOccurrencesOfString(":", withString: ".")
                             let fp = dirPath.stringByAppendingPathComponent("paste_" + date_str + ".png")
+                            */
+                            let prefix = "paste_"
+                            var fn = String(format: prefix + "%d.png", auto_paste_index)
+                            while NSFileManager.defaultManager().fileExistsAtPath(dirPath.stringByAppendingPathComponent(fn)) {
+                                auto_paste_index = auto_paste_index+1
+                                fn = String(format: prefix + "%d.png", auto_note_index)
+                            }
+                            let fp = dirPath.stringByAppendingPathComponent(fn)
                             data?.writeToFile(fp, atomically: true)
                             did_paste = true
                         }
@@ -280,16 +326,22 @@ class GameScene: SKScene {
         }
         return did_paste
     }
-    func createRel(from:LrnEntity, to:LrnEntity) {
+    func createRel(from:LrnEntity, to:LrnEntity, delOnFound:Bool=false) -> Bool {
         for erel in from.rel {
-            if (erel.from.fn == from.fn && erel.from.fn == to.fn) ||
-                (erel.from.fn == to.fn && erel.from.fn == from.fn)
+            if (erel.from.fn == from.fn && erel.to.fn == to.fn) ||
+                (erel.from.fn == to.fn && erel.to.fn == from.fn)
             {
-                return
+                if delOnFound {
+                    erel.node.removeFromParent()
+                    from.rel.removeAtIndex( find(from.rel, erel)! )
+                    to.rel.removeAtIndex( find(to.rel, erel)! )
+                }
+                return false
             }
         }
-        var rel = RelInfo(); rel.from = from; rel.to = to;
+        var rel = RelInfo(); rel.id = self.rel_id_gen; self.rel_id_gen++; rel.from = from; rel.to = to;
         from.rel.append(rel); rel.to.rel.append(rel);
+        return true
     }
     func resolveRels(ent:LrnEntity) {
         for pri in ent.load_rel_to {
@@ -345,7 +397,10 @@ class GameScene: SKScene {
         }
         let pts1 = getRectRot(from)
         let pts2 = getRectRot(to)
-        let (rel_pt1, rel_pt2) = chooseRelPoints(pts1, pts2)
+        var is_outer = (pts2[0].x > pts1[2].x || pts2[2].x < pts1[0].x) && (pts2[0].y > pts1[1].y || pts2[1].y < pts1[0].y) as Bool
+        let rpts1 = (is_outer) ? pts1 : Array(pts1[Range(start:4,end:8)])
+        let rpts2 = (is_outer) ? pts2 : Array(pts2[Range(start:4,end:8)])
+        let (rel_pt1, rel_pt2) = chooseRelPoints(rpts1, rpts2)
         let scl = 2.0 as CGFloat
         let pathToDraw:CGMutablePathRef = CGPathCreateMutable()
         CGPathMoveToPoint(pathToDraw, nil, rel_pt1.x/scl, rel_pt1.y/scl)
@@ -384,22 +439,38 @@ class GameScene: SKScene {
     }
     func mainLoad() {
         let fileManager = NSFileManager.defaultManager()
-        let dp = dirPath.stringByAppendingPathComponent("state")
-        NSFileManager.defaultManager().createDirectoryAtPath(dp, withIntermediateDirectories: false, attributes: nil, error: nil)
-        let contents = fileManager.contentsOfDirectoryAtPath(dirPath, error: nil)
-        let center = CGPoint(x:self.size.width/2, y:self.size.height/2)
-        var i : Int = 0
+        sdirPath = dirPath.stringByAppendingPathComponent("state")
+        NSFileManager.defaultManager().createDirectoryAtPath(sdirPath, withIntermediateDirectories: false, attributes: nil, error: nil)
         self.rroot.name = "^rroot"
         self.addChild(rroot)
         self.root.name = "^root"
         self.rroot.addChild(root)
-        self.note.node = SKLabelNode(fontNamed:"PilGI")
-        self.note.node.fontSize = 38
-        self.note.node.fontColor = SKColor.blackColor()
-        self.note.node.position = center
-        self.note.node.text = ""
-        self.addChild(self.note.node)
-        self.note.node.hidden = true
+        if (true) {
+            let fp = sdirPath.stringByAppendingPathComponent("state_root.lrn")
+            if NSFileManager.defaultManager().fileExistsAtPath(fp) {
+                let cfg = NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding, error: nil) as! String
+                let lines = cfg.componentsSeparatedByString("\n")
+                var li = 0
+                var key = ""
+                for line in lines {
+                    if (li % 2 == 0) {
+                        key = line
+                    } else {
+                        if (key == "pos.x") {
+                            root.position.x = CGFloat((line as NSString).floatValue)
+                        } else if (key == "pos.y") {
+                            root.position.y = CGFloat((line as NSString).floatValue)
+                        } else if (key == "scl") {
+                            root.setScale( CGFloat((line as NSString).floatValue) )
+                        }
+                    }
+                    li++
+                }
+            }
+        }
+        let contents = fileManager.contentsOfDirectoryAtPath(dirPath, error: nil)
+        let center = CGPoint(x:self.size.width/2, y:self.size.height/2)
+        var i : Int = 0
         if contents != nil {
             let files = contents as! [String]
             for fn in files {
@@ -410,6 +481,7 @@ class GameScene: SKScene {
         }
         resolveAllRels()
         createAllNodesForRels()
+        self.backgroundColor = NSColor.whiteColor()
     }
     override func didMoveToView(view: SKView) {
         let openPanel = NSOpenPanel()
@@ -487,11 +559,26 @@ class GameScene: SKScene {
         func handleLeft(evt: NSEvent) {
             if let ent = self.sel_ent {
                 if (ent.type == "text") {
-                    if (ent.fntCol == NSColor.blackColor()) {
-                        ent.fntCol = NSColor.redColor()
-                    } else {
-                        ent.fntCol = NSColor.blackColor()
+                    var next = false
+                    var ki = "black"
+                    for (k, v) in self.colNames {
+                        if next {
+                            ki = k; next = false; break;
+                        } else {
+                            if ent.fntCol == v {
+                                next = true
+                            }
+                        }
                     }
+                    if next {
+                        for (k, v) in self.colNames {
+                            ki = k; break;
+                        }
+                    }
+                    if let ccol = self.colNames[ent.fntColName] {
+                        ent.fntColName = ki
+                    }
+                    ent.fntCol = self.colNames[ki]!
                     updateLrnEntityNote(ent)
                 }
             }
@@ -530,6 +617,9 @@ class GameScene: SKScene {
                 else if evt.characters == "p" {
                     if (paste()) { refresh() }
                 }
+                else if evt.characters == "w" {
+                    write()
+                }
                 else if evt.characters == "r" {
                     refresh()
                 } else {
@@ -549,11 +639,13 @@ class GameScene: SKScene {
     override func mouseMoved(evt: NSEvent) {
         self.last_evt_time = self.time; checkWake();
         self.last_mouse_evt = evt
+        killFcsNode()
     }
     func isEntityNode(node: SKNode) -> Bool {
         return node.name != nil && node.name != "" && !node.name!.hasPrefix("^")
     }
     func setSelNode(node: SKNode) {
+        let scl_add = CGFloat(0.0 * 0.125*1.5)
         if self.sel != node {
             if let ent = self.sel_ent {
                 ent.node_scl_add = 0.0
@@ -564,7 +656,7 @@ class GameScene: SKScene {
                 self.sel = node
                 self.sel_ent = self.entities_by_fn[self.sel.name!]
                 if let ent = self.sel_ent {
-                    self.sel_ent!.node_scl_add = 0.125*1.5
+                    self.sel_ent!.node_scl_add = scl_add
                     self.sel.setScale( ent.scl +  ent.node_scl_add)
                     self.sel.zPosition = 2
                 }
@@ -574,8 +666,29 @@ class GameScene: SKScene {
             }
         }
     }
+    func killFcsNode() {
+        self.fcs_cpy.removeFromParent()
+        self.fcs_cpy = SKNode()
+    }
+    func setFcsNode(node: SKNode) {
+        killFcsNode()
+        self.fcs_cpy = node.copy() as! SKNode
+        self.fcs_cpy.name = "^focus"
+        self.fcs_cpy.position = CGPoint(x:self.size.width/2, y:self.size.height/2)
+        self.fcs_cpy.setScale(1.0)
+        self.fcs_cpy.zRotation = 0.0
+        self.fcs_cpy.zPosition = 3.0
+        self.addChild(self.fcs_cpy)
+    }
     override func mouseDown(evt: NSEvent) {
         self.last_evt_time = self.time; checkWake();
+        if (evt.clickCount == 2) {
+            killFcsNode()
+            let dbl_sel = self.nodeAtPoint(evt.locationInNode(self))
+            if isEntityNode(dbl_sel) {
+                setFcsNode(dbl_sel)
+            }
+        }
     }
     override func mouseUp(evt: NSEvent) {
         self.last_evt_time = self.time; checkWake();
@@ -586,13 +699,17 @@ class GameScene: SKScene {
             var found = false
             if let fent = self.entities_by_fn[from.name!] {
                 if let tent = self.entities_by_fn[to.name!] {
-                    createRel(fent, to: tent)
-                    createNodesFroRels(fent)
+                    if (createRel(fent, to: tent, delOnFound: true)) {
+                        createNodesFroRels(fent)
+                    }
                 }
             }
         }
         if (isEntityNode(node)) { setSelNode(node) }
     }
+    //override func touchesBeganWithEvent(evt: NSEvent) {
+    //    println("touches")
+    //}
     func checkWake() {
         if (self.last_evt_time.distanceTo(self.time) > 0.5) {
             self.view!.paused = true

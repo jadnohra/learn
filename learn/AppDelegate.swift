@@ -48,9 +48,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             /* Sprite Kit applies additional optimizations to improve rendering performance */
             self.skView!.ignoresSiblingOrder = true
             
-            self.skView!.showsFPS = true
-            self.skView!.showsNodeCount = true
+            //self.skView!.showsFPS = true
+            //self.skView!.showsNodeCount = true
             self.skView!.frameInterval = 2
+            self.skView!.acceptsTouchEvents = true
             
             self.window.acceptsMouseMovedEvents = true
         }
