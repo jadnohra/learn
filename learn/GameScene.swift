@@ -72,6 +72,8 @@ class GameScene: SKScene {
     var time : CFTimeInterval = CFTimeInterval()
     var last_evt_time : CFTimeInterval = CFTimeInterval()
     var fcs_cpy : SKNode = SKNode()
+    var fcs_cpy_orig : SKNode = SKNode()
+    var deferred = [""]
     func write() {
         let dp = sdirPath
         for ent in entities {
@@ -134,6 +136,9 @@ class GameScene: SKScene {
             return true
         }
         return false
+    }
+    func deleteEntityFile(ent: LrnEntity) {
+        NSFileManager.defaultManager().removeItemAtPath(ent.fp, error: nil)
     }
     func updateLrnEntityNote(ent: LrnEntity) {
         if ent.type == "text" {
@@ -608,6 +613,14 @@ class GameScene: SKScene {
                 case 123: evt;   // left
                 default: evt;
                 }
+                
+                if evt.characters == "d" {
+                    if isEntityNode(self.fcs_cpy_orig) {
+                        killFcsNode()
+                        deleteEntityFile(self.entities_by_fn[self.fcs_cpy_orig.name!]!)
+                        self.fcs_cpy_orig.removeFromParent()
+                    }
+                }
             }
             else {
                 if evt.characters == "n" {
@@ -639,7 +652,7 @@ class GameScene: SKScene {
     override func mouseMoved(evt: NSEvent) {
         self.last_evt_time = self.time; checkWake();
         self.last_mouse_evt = evt
-        killFcsNode()
+        self.deferred.append("killFcsNode"); //killFcsNode()
     }
     func isEntityNode(node: SKNode) -> Bool {
         return node.name != nil && node.name != "" && !node.name!.hasPrefix("^")
@@ -672,6 +685,7 @@ class GameScene: SKScene {
     }
     func setFcsNode(node: SKNode) {
         killFcsNode()
+        self.fcs_cpy_orig = node
         self.fcs_cpy = node.copy() as! SKNode
         self.fcs_cpy.name = "^focus"
         self.fcs_cpy.position = CGPoint(x:self.size.width/2, y:self.size.height/2)
@@ -720,6 +734,12 @@ class GameScene: SKScene {
     }
     override func update(currentTime: CFTimeInterval) {
         self.time = currentTime; checkWake();
+        for (i,cmd) in enumerate(self.deferred) {
+            if (cmd == "killFcsNode") {
+                self.killFcsNode()
+            }
+        }
+        self.deferred = []
         //if (self.sel.name != nil) && (isEntityNode(self.sel)) {
         //    println(self.convertPoint(CGPoint(x: 0,y: 0), fromNode: self.sel))
         //}
