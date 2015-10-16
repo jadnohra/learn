@@ -351,7 +351,9 @@ class GameScene: SKScene {
     func resolveRels(ent:LrnEntity) {
         for pri in ent.load_rel_to {
             if (pri.resolved == false) {
-                createRel(ent, to: self.entities_by_fn[pri.to]!)
+                if let toEnt = self.entities_by_fn[pri.to] {
+                    createRel(ent, to: toEnt)
+                }
                 pri.resolved = true
             }
         }
@@ -635,21 +637,30 @@ class GameScene: SKScene {
                 }
                 else if evt.characters == "r" {
                     refresh()
-                } else {
+                }
+                else if evt.characters == "x" {
+                    self.view!.paused = true
+                }
+                else {
                     switch(evt.keyCode) {
                     case 124: handleRight(evt)
                     case 123: handleLeft(evt)
                     default: evt;
                     }
                 }
+                
             }
         }
     }
     override func mouseEntered(evt: NSEvent) {
+        if self.view!.paused == true { return; }
+
         self.last_evt_time = self.time; checkWake();
         self.last_mouse_evt = evt
     }
     override func mouseMoved(evt: NSEvent) {
+        if self.view!.paused == true { return; }
+
         self.last_evt_time = self.time; checkWake();
         self.last_mouse_evt = evt
         self.deferred.append("killFcsNode"); //killFcsNode()
@@ -725,15 +736,16 @@ class GameScene: SKScene {
     //    println("touches")
     //}
     func checkWake() {
-        if (self.last_evt_time.distanceTo(self.time) > 0.5) {
-            self.view!.paused = true
-        }
-        else {
+        //if (self.last_evt_time.distanceTo(self.time) > 0.5) {
+        //    self.view!.paused = true
+        //}
+        //else {
             self.view!.paused = false
-        }
+        //}
     }
     override func update(currentTime: CFTimeInterval) {
-        self.time = currentTime; checkWake();
+        if (self.view!.paused == true) {return}
+        self.time = currentTime; //checkWake();
         for (i,cmd) in enumerate(self.deferred) {
             if (cmd == "killFcsNode") {
                 self.killFcsNode()
@@ -742,6 +754,9 @@ class GameScene: SKScene {
         self.deferred = []
         //if (self.sel.name != nil) && (isEntityNode(self.sel)) {
         //    println(self.convertPoint(CGPoint(x: 0,y: 0), fromNode: self.sel))
+        //}
+        //if (self.last_evt_time.distanceTo(self.time) > 0.5) {
+        //    self.view!.paused = true
         //}
     }
 }
