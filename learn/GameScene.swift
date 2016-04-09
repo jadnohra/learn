@@ -34,6 +34,7 @@ class LrnEntity: Equatable {
     var fn : String = ""
     var fp : String = ""
     var node : SKNode = SKNode()
+    var sel_node : SKShapeNode = SKShapeNode()
     var type : String = ""
     var load_rel_to = Array<PreRelInfo>()
     var rel = Array<RelInfo>()
@@ -64,6 +65,7 @@ class GameScene: SKScene {
     var sel_ent : LrnEntity?
     var drag_sel : SKNode = SKNode()
     var entities = Array<LrnEntity>()
+    var sel_entities = Array<LrnEntity>()
     var entities_by_fn = Dictionary<String, LrnEntity>()
     var state : String = ""
     var auto_note_index = 1
@@ -73,7 +75,14 @@ class GameScene: SKScene {
     var last_evt_time : CFTimeInterval = CFTimeInterval()
     var fcs_cpy : SKNode = SKNode()
     var fcs_cpy_orig : SKNode = SKNode()
+    var drag_rect : SKShapeNode = SKShapeNode()
     var deferred = [""]
+    var is_sel_dragging = false;
+    var is_sel_moving = false;
+    var sel_drag_from : NSPoint = NSPoint();
+    var sel_drag_to : NSPoint = NSPoint();
+    var sel_move_from : NSPoint = NSPoint();
+    var started_sel_moving = false;
     func write() {
         let dp = sdirPath
         for ent in entities {
@@ -89,8 +98,11 @@ class GameScene: SKScene {
                     cfg = cfg + "rel_to\n" + rel.to.fn + "\n"
                 }
             }
-            let fp = dp.stringByAppendingPathComponent("_" + ent.fn + ".lrn")
-            cfg.writeToFile(fp, atomically: false, encoding: NSUTF8StringEncoding, error: nil)
+            let fp = (dp as NSString).stringByAppendingPathComponent("_" + ent.fn + ".lrn")
+            do {
+                try cfg.writeToFile(fp, atomically: false, encoding: NSUTF8StringEncoding)
+            } catch _ {
+            }
         }
         if (true)
         {
@@ -98,8 +110,11 @@ class GameScene: SKScene {
             cfg = cfg + String(format: "pos.x\n%f\n", Float(root.position.x))
             cfg = cfg + String(format: "pos.y\n%f\n", Float(root.position.y))
             cfg = cfg + String(format: "scl\n%f\n", Float(root.xScale))
-            let fp = dp.stringByAppendingPathComponent("state_root.lrn")
-            cfg.writeToFile(fp, atomically: false, encoding: NSUTF8StringEncoding, error: nil);
+            let fp = (dp as NSString).stringByAppendingPathComponent("state_root.lrn")
+            do {
+                try cfg.writeToFile(fp, atomically: false, encoding: NSUTF8StringEncoding)
+            } catch _ {
+            };
         }
     }
     func createTextTexture(_text: NSString, fntName: String, fntSize: CGFloat = 14.0, fntCol: NSColor = NSColor.blackColor()) -> SKTexture{
@@ -121,11 +136,14 @@ class GameScene: SKScene {
     }
     func createLrnNote(text: String, prefix : String = "note_") -> String {
         var fn = String(format: prefix + "%d.txt", auto_note_index)
-        while NSFileManager.defaultManager().fileExistsAtPath(dirPath.stringByAppendingPathComponent(fn)) {
+        while NSFileManager.defaultManager().fileExistsAtPath((dirPath as NSString).stringByAppendingPathComponent(fn)) {
             auto_note_index = auto_note_index+1
             fn = String(format: prefix + "%d.txt", auto_note_index)
         }
-        text.writeToFile(dirPath.stringByAppendingPathComponent(fn), atomically: false, encoding: NSUTF8StringEncoding, error: nil);
+        do {
+            try text.writeToFile((dirPath as NSString).stringByAppendingPathComponent(fn), atomically: false, encoding: NSUTF8StringEncoding)
+        } catch _ {
+        };
         return fn
     }
     func isLrnEntityFile(fn:String) -> Bool {
@@ -138,7 +156,10 @@ class GameScene: SKScene {
         return false
     }
     func deleteEntityFile(ent: LrnEntity) {
-        NSFileManager.defaultManager().removeItemAtPath(ent.fp, error: nil)
+        do {
+            try NSFileManager.defaultManager().removeItemAtPath(ent.fp)
+        } catch _ {
+        }
     }
     func updateLrnEntityNote(ent: LrnEntity) {
         if ent.type == "text" {
@@ -150,21 +171,21 @@ class GameScene: SKScene {
     }
     func fixText(txt: String) -> String {
         if txt.hasSuffix("\n") {
-            return dropLast(txt)
+            return String(txt.characters.dropLast())
         }
         return txt
     }
     func updateLrnEntityFromFile(fn: String, ent: LrnEntity) {
         if ent.type == "image" {
-            let fp = dirPath.stringByAppendingPathComponent(fn)
+            let fp = (dirPath as NSString).stringByAppendingPathComponent(fn)
             let img = NSImage(contentsOfFile: fp)
             let tex = SKTexture(image: img!)
             (ent.node as! SKSpriteNode).size = tex.size()
             (ent.node as! SKSpriteNode).texture = tex
-            
+
         } else {
-            let fp = dirPath.stringByAppendingPathComponent(fn)
-            let txt = fixText(NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding, error: nil) as! String)
+            let fp = (dirPath as NSString).stringByAppendingPathComponent(fn)
+            let txt = fixText((try! NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding)) as String)
             ent.text = txt
             let tex = createTextTexture(ent.text, fntName: ent.fntName, fntSize: ent.fntSize, fntCol: ent.fntCol)
             (ent.node as! SKSpriteNode).size = tex.size()
@@ -172,14 +193,14 @@ class GameScene: SKScene {
         }
     }
     func addLrnEntityFromFile(fn: String, center: CGPoint, i:Int) -> Bool {
-        var ent = LrnEntity()
+        let ent = LrnEntity()
         var pos = CGPoint(x:(center.x + CGFloat(i)*40.0), y:(center.y + CGFloat(i)*40.0))
         if (true)
         {
-            let dp = dirPath.stringByAppendingPathComponent("state")
-            let fp = dp.stringByAppendingPathComponent("_" + fn + ".lrn")
+            let dp = (dirPath as NSString).stringByAppendingPathComponent("state")
+            let fp = (dp as NSString).stringByAppendingPathComponent("_" + fn + ".lrn")
             if NSFileManager.defaultManager().fileExistsAtPath(fp) {
-                let cfg = NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding, error: nil) as! String
+                let cfg = (try! NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding)) as String
                 let lines = cfg.componentsSeparatedByString("\n")
                 var li = 0
                 var key = ""
@@ -206,7 +227,7 @@ class GameScene: SKScene {
                                 ent.fntCol = self.colNames["black"]!
                             }
                         } else if (key == "rel_to") {
-                            var pri = PreRelInfo(); pri.to = line; pri.resolved = false;
+                            let pri = PreRelInfo(); pri.to = line; pri.resolved = false;
                             ent.load_rel_to.append(pri)
                         }
                     }
@@ -215,53 +236,62 @@ class GameScene: SKScene {
             }
         }
         if fn.hasSuffix("png") || fn.hasSuffix("jpg") || fn.hasSuffix("jpeg") {
-            let fp = dirPath.stringByAppendingPathComponent(fn)
+            let fp = (dirPath as NSString).stringByAppendingPathComponent(fn)
             let img = NSImage(contentsOfFile: fp)
             let tex = SKTexture(image: img!)
             let sprite = SKSpriteNode(texture: tex)
             ent.fn = fn; ent.fp = fp; ent.node = sprite; ent.type = "image";
             if (fn.hasPrefix("paste_")) {
-                let num = fn.componentsSeparatedByString("_")[1].componentsSeparatedByString(".")[0].toInt()
+                let num = Int(fn.componentsSeparatedByString("_")[1].componentsSeparatedByString(".")[0])
                 if num >= self.auto_paste_index { self.auto_paste_index = num! + 1}
             }
         } else if fn.hasSuffix("txt") && (fn.rangeOfString("ocr") == nil) {
-            let fp = dirPath.stringByAppendingPathComponent(fn)
-            let txt = NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding, error: nil) as! String
+            let fp = (dirPath as NSString).stringByAppendingPathComponent(fn)
+            let txt = (try! NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding)) as String
             ent.text = fixText(txt);
             let sprite = SKSpriteNode(texture: createTextTexture(ent.text, fntName: ent.fntName, fntSize: ent.fntSize, fntCol: ent.fntCol))
             ent.fn = fn; ent.fp = fp; ent.node = sprite; ent.type = "text";
             if (fn.hasPrefix("auto_note")) {
-                let num = fn.componentsSeparatedByString("_")[2].componentsSeparatedByString(".")[0].toInt()
+                let num = Int(fn.componentsSeparatedByString("_")[2].componentsSeparatedByString(".")[0])
                 if num >= self.auto_note_index { self.auto_note_index = num! + 1}
             }
             ent.scl = 1.0 // We use font size for this
         }
         if (ent.fn != "")
         {
-            let attrs = NSFileManager.defaultManager().attributesOfItemAtPath(ent.fp, error:nil) as! [String: AnyObject]
+            let attrs = (try! NSFileManager.defaultManager().attributesOfItemAtPath(ent.fp))
             ent.modif = attrs[NSFileModificationDate] as! NSDate
             ent.id = id_gen; id_gen++;
             ent.node.position = pos
             ent.node.setScale(ent.scl)
             //ent.node.zRotation = CGFloat(randf2(-0.01, 0.01))
             ent.node.name = ent.fn
+            let bbr : CGFloat = 12.0
+            let bb = SKPhysicsBody(circleOfRadius: bbr); bb.affectedByGravity = false; bb.mass = 0;
+            ent.node.physicsBody = bb
+
+            ent.sel_node = createCircleNode( CGPoint(x: 0,y: 0), rad: bbr, name: "^_sel_" + ent.node.name!, zPos: 1.5)
+            ent.sel_node.fillColor = SKColor.redColor();
+            //ent.node.addChild(ent.sel_node)
+
             self.entities.append(ent)
             self.entities_by_fn[ent.fn] = ent
             self.root.addChild(ent.node)
+
             return true
         }
         return false
     }
     func refresh() {
         let fileManager = NSFileManager.defaultManager()
-        let contents = fileManager.contentsOfDirectoryAtPath(dirPath, error: nil)
+        let contents = try? fileManager.contentsOfDirectoryAtPath(dirPath)
         if contents != nil {
             var newi = 0
-            let files = contents as! [String]
-            for fn in files {
+            let files = contents
+            for fn in files! {
                 if (isLrnEntityFile(fn)) {
-                    let fp = dirPath.stringByAppendingPathComponent(fn)
-                    let attrs = fileManager.attributesOfItemAtPath(fp, error:nil) as! [String: AnyObject]
+                    let fp = (dirPath as NSString).stringByAppendingPathComponent(fn)
+                    let attrs = (try! fileManager.attributesOfItemAtPath(fp))
                     let modif = attrs[NSFileModificationDate] as! NSDate
                     let ent = entities_by_fn[fn]
                     if (ent != nil) {
@@ -301,7 +331,7 @@ class GameScene: SKScene {
                         var img_rep = NSImageRep()
                         for rep in img!.representations {
                             if rep is NSBitmapImageRep {
-                                img_rep = rep as! NSImageRep
+                                img_rep = rep
                             }
                         }
                         if img_rep is NSBitmapImageRep {
@@ -316,16 +346,16 @@ class GameScene: SKScene {
                             */
                             let prefix = "paste_"
                             var fn = String(format: prefix + "%d.png", auto_paste_index)
-                            while NSFileManager.defaultManager().fileExistsAtPath(dirPath.stringByAppendingPathComponent(fn)) {
+                            while NSFileManager.defaultManager().fileExistsAtPath((dirPath as NSString).stringByAppendingPathComponent(fn)) {
                                 auto_paste_index = auto_paste_index+1
                                 fn = String(format: prefix + "%d.png", auto_note_index)
                             }
-                            let fp = dirPath.stringByAppendingPathComponent(fn)
+                            let fp = (dirPath as NSString).stringByAppendingPathComponent(fn)
                             data?.writeToFile(fp, atomically: true)
                             did_paste = true
                         }
                     }
-                    
+
                 }
             }
         }
@@ -338,13 +368,13 @@ class GameScene: SKScene {
             {
                 if delOnFound {
                     erel.node.removeFromParent()
-                    from.rel.removeAtIndex( find(from.rel, erel)! )
-                    to.rel.removeAtIndex( find(to.rel, erel)! )
+                    from.rel.removeAtIndex( from.rel.indexOf(erel)! )
+                    to.rel.removeAtIndex( to.rel.indexOf(erel)! )
                 }
                 return false
             }
         }
-        var rel = RelInfo(); rel.id = self.rel_id_gen; self.rel_id_gen++; rel.from = from; rel.to = to;
+        let rel = RelInfo(); rel.id = self.rel_id_gen; self.rel_id_gen++; rel.from = from; rel.to = to;
         from.rel.append(rel); rel.to.rel.append(rel);
         return true
     }
@@ -370,11 +400,11 @@ class GameScene: SKScene {
             {
                 return (p2.x-p1.x)*(p2.x-p1.x)+(p2.y-p1.y)*(p2.y-p1.y)
             }
-            var min_1 = 0; var min_2 = 0; var min_dist = distSq(pts1[0], pts2[0])
-            for (i1, pt1) in enumerate(pts1) {
-                for (i2, pt2) in enumerate(pts2) {
-                    if distSq(pt1, pt2) < min_dist {
-                        min_dist = distSq(pt1, pt2); min_1 = i1; min_2 = i2;
+            var min_1 = 0; var min_2 = 0; var min_dist = distSq(pts1[0], p2: pts2[0])
+            for (i1, pt1) in pts1.enumerate() {
+                for (i2, pt2) in pts2.enumerate() {
+                    if distSq(pt1, p2: pt2) < min_dist {
+                        min_dist = distSq(pt1, p2: pt2); min_1 = i1; min_2 = i2;
                     }
                 }
             }
@@ -407,14 +437,14 @@ class GameScene: SKScene {
         var is_outer = (pts2[0].x > pts1[2].x || pts2[2].x < pts1[0].x) && (pts2[0].y > pts1[1].y || pts2[1].y < pts1[0].y) as Bool
         let rpts1 = (is_outer) ? pts1 : Array(pts1[Range(start:4,end:8)])
         let rpts2 = (is_outer) ? pts2 : Array(pts2[Range(start:4,end:8)])
-        let (rel_pt1, rel_pt2) = chooseRelPoints(rpts1, rpts2)
+        let (rel_pt1, rel_pt2) = chooseRelPoints(rpts1, pts2: rpts2)
         let scl = 2.0 as CGFloat
         let pathToDraw:CGMutablePathRef = CGPathCreateMutable()
         CGPathMoveToPoint(pathToDraw, nil, rel_pt1.x/scl, rel_pt1.y/scl)
         CGPathAddLineToPoint(pathToDraw, nil, rel_pt2.x/scl, rel_pt2.y/scl)
         node.path = pathToDraw
         node.setScale(scl)
-        
+
     }
     func updateRelNodes(ent: LrnEntity) {
         for rel in ent.rel {
@@ -446,16 +476,19 @@ class GameScene: SKScene {
     }
     func mainLoad() {
         let fileManager = NSFileManager.defaultManager()
-        sdirPath = dirPath.stringByAppendingPathComponent("state")
-        NSFileManager.defaultManager().createDirectoryAtPath(sdirPath, withIntermediateDirectories: false, attributes: nil, error: nil)
+        sdirPath = (dirPath as NSString).stringByAppendingPathComponent("state")
+        do {
+            try NSFileManager.defaultManager().createDirectoryAtPath(sdirPath, withIntermediateDirectories: false, attributes: nil)
+        } catch _ {
+        }
         self.rroot.name = "^rroot"
         self.addChild(rroot)
         self.root.name = "^root"
         self.rroot.addChild(root)
         if (true) {
-            let fp = sdirPath.stringByAppendingPathComponent("state_root.lrn")
+            let fp = (sdirPath as NSString).stringByAppendingPathComponent("state_root.lrn")
             if NSFileManager.defaultManager().fileExistsAtPath(fp) {
-                let cfg = NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding, error: nil) as! String
+                let cfg = (try! NSString(contentsOfFile: fp, encoding: NSUTF8StringEncoding)) as String
                 let lines = cfg.componentsSeparatedByString("\n")
                 var li = 0
                 var key = ""
@@ -475,12 +508,12 @@ class GameScene: SKScene {
                 }
             }
         }
-        let contents = fileManager.contentsOfDirectoryAtPath(dirPath, error: nil)
+        let contents = try? fileManager.contentsOfDirectoryAtPath(dirPath)
         let center = CGPoint(x:self.size.width/2, y:self.size.height/2)
         var i : Int = 0
         if contents != nil {
-            let files = contents as! [String]
-            for fn in files {
+            let files = contents
+            for fn in files! {
                 if addLrnEntityFromFile(fn, center:center, i:i) {
                     i++
                 }
@@ -513,22 +546,48 @@ class GameScene: SKScene {
     }
     override func mouseDragged(evt: NSEvent) {
         self.last_evt_time = self.time; checkWake();
-        if (self.drag_sel.name == nil) {
-            self.drag_sel = self.nodeAtPoint(evt.locationInNode(self))
-            if (self.drag_sel.name == "^rroot") {
-                self.drag_sel = SKNode()
-            }
-        }
-        let node = self.drag_sel
-        if (evt.modifierFlags & .ShiftKeyMask != nil) {
-            self.root.setScale(self.root.xScale * (1.0 + evt.deltaX/20.0) )
+        if self.is_sel_moving == false {
+          if (self.drag_sel.name == nil) {
+              self.drag_sel = self.nodeAtPoint(evt.locationInNode(self))
+              if (self.drag_sel.name == "^rroot") {
+                  self.drag_sel = SKNode()
+              }
+          }
+          let node = self.drag_sel
+          if (evt.modifierFlags.intersect(.ShiftKeyMask) != []) {
+              self.root.setScale(self.root.xScale * (1.0 + evt.deltaX/20.0) )
+          }
+          else {
+              if (node.name != nil && !node.name!.hasPrefix("^")) {
+                  node.position = evt.locationInNode(node.parent!)
+                  updateRelNodes(self.entities_by_fn[node.name!]!)
+              } else {
+                  self.root.position = CGPoint(x: self.root.position.x + evt.deltaX, y: self.root.position.y - evt.deltaY)
+              }
+          }
         }
         else {
-            if (node.name != nil && !node.name!.hasPrefix("^")) {
-                node.position = evt.locationInNode(node.parent)
-                updateRelNodes(self.entities_by_fn[node.name!]!)
-            } else {
-                self.root.position = CGPoint(x: self.root.position.x + evt.deltaX, y: self.root.position.y - evt.deltaY)
+          if self.started_sel_moving == false {
+            self.started_sel_moving = true
+            self.sel_move_from = evt.locationInNode(self.root)
+          }
+          let mp = evt.locationInNode(self.root)
+          let dd = CGPoint(x: mp.x - self.sel_move_from.x, y: mp.y - self.sel_move_from.y)
+          for ent in sel_entities {
+            ent.node.position = CGPoint(x: ent.node.position.x + dd.x, y: ent.node.position.y + dd.y)
+          }
+          self.sel_move_from = mp
+        }
+    }
+    override func keyUp(evt: NSEvent) {
+        if evt.characters == "s" {
+            if self.is_sel_dragging == true
+            {
+                self.is_sel_dragging = false
+                self.is_sel_moving = true
+                self.drag_rect.strokeColor = SKColor.redColor();
+                self.started_sel_moving == false
+                killDragRectNode()
             }
         }
     }
@@ -594,7 +653,7 @@ class GameScene: SKScene {
             if let ent = self.sel_ent {
                 if (ent.type == "text") {
                     var ni = 0
-                    for (i, ff) in enumerate(self.fntNames) {
+                    for (i, ff) in self.fntNames.enumerate() {
                         if ent.fntName == ff {
                             ni = (i + 1) % self.fntNames.count
                         }
@@ -615,7 +674,7 @@ class GameScene: SKScene {
                 case 123: evt;   // left
                 default: evt;
                 }
-                
+
                 if evt.characters == "d" {
                     if isEntityNode(self.fcs_cpy_orig) {
                         killFcsNode()
@@ -641,6 +700,23 @@ class GameScene: SKScene {
                 else if evt.characters == "x" {
                     self.view!.paused = true
                 }
+                else if evt.characters == "s" {
+                    if self.is_sel_dragging == false
+                    {
+                        self.sel_drag_from = last_mouse_evt.locationInNode(self);
+                        self.sel_drag_to = last_mouse_evt.locationInNode(self);
+                        self.is_sel_dragging = true;
+                        setDragRectNode();
+                    }
+                } else if evt.characters == "m" {
+
+                    let sceneRect = CGRectMake( -100, -100, 10000, 10000)
+
+                    self.physicsWorld.enumerateBodiesInRect(sceneRect) {
+                        (body: SKPhysicsBody!, stop: UnsafeMutablePointer<ObjCBool>) in
+                          print (body.node!.name)
+                        }
+                }
                 else {
                     switch(evt.keyCode) {
                     case 124: handleRight(evt)
@@ -648,7 +724,7 @@ class GameScene: SKScene {
                     default: evt;
                     }
                 }
-                
+
             }
         }
     }
@@ -661,9 +737,38 @@ class GameScene: SKScene {
     override func mouseMoved(evt: NSEvent) {
         if self.view!.paused == true { return; }
 
+        if (self.started_sel_moving == true) {
+          self.is_sel_moving = false
+          self.started_sel_moving = false
+          for ent in sel_entities {
+            updateRelNodes(ent)
+          }
+          resetSelEntities(Array<SKNode>());
+        }
+
         self.last_evt_time = self.time; checkWake();
         self.last_mouse_evt = evt
         self.deferred.append("killFcsNode"); //killFcsNode()
+
+        if self.is_sel_dragging == true
+        {
+            self.sel_drag_to = last_mouse_evt.locationInNode(self)
+            setDragRectNode()
+            updateDragRectNode()
+            if (true)
+            {
+                let sceneRect = CGRectMake(self.sel_drag_from.x, self.sel_drag_from.y, self.sel_drag_to.x-self.sel_drag_from.x, self.sel_drag_to.y-self.sel_drag_from.y)
+                let sceneRect2 = CGRectMake(sceneRect.minX, sceneRect.minY, sceneRect.width, sceneRect.height)
+
+                var sel_nodes = Array<SKNode>()
+                self.physicsWorld.enumerateBodiesInRect(sceneRect2) {
+                    (body: SKPhysicsBody!, stop: UnsafeMutablePointer<ObjCBool>) in
+                    sel_nodes.append(body.node!)
+                    //print (body.node!.name)
+                }
+                resetSelEntities(sel_nodes)
+            }
+        }
     }
     func isEntityNode(node: SKNode) -> Bool {
         return node.name != nil && node.name != "" && !node.name!.hasPrefix("^")
@@ -690,6 +795,19 @@ class GameScene: SKScene {
             }
         }
     }
+    func resetSelEntities(sel_nodes: Array<SKNode>) {
+      for ent in self.sel_entities {
+        ent.sel_node.removeFromParent()
+      }
+      sel_entities.removeAll();
+      for node in sel_nodes {
+        if isEntityNode(node) {
+          let sel_ent = self.entities_by_fn[node.name!]!
+          sel_ent.node.addChild(sel_ent.sel_node)
+          sel_entities.append(sel_ent)
+        }
+      }
+    }
     func killFcsNode() {
         self.fcs_cpy.removeFromParent()
         self.fcs_cpy = SKNode()
@@ -705,8 +823,52 @@ class GameScene: SKScene {
         self.fcs_cpy.zPosition = 3.0
         self.addChild(self.fcs_cpy)
     }
+    func killDragRectNode() {
+        self.drag_rect.removeFromParent()
+        self.drag_rect = SKShapeNode()
+    }
+    func createCircleNode(center: CGPoint, rad: CGFloat, name: String, zPos: CGFloat) -> SKShapeNode {
+        let circ_node = SKShapeNode(circleOfRadius: rad)
+        circ_node.strokeColor = SKColor.blackColor()
+        circ_node.name = name
+        circ_node.position = center
+        circ_node.setScale(1.0)
+        circ_node.zRotation = 0.0
+        circ_node.zPosition = zPos
+        return circ_node
+    }
+    func createRectNode(from: CGPoint, to: CGPoint, name: String, zPos: CGFloat) -> SKShapeNode {
+        let rect_node = SKShapeNode(rectOfSize: CGSize(width: 1.0 * (to.x - from.x), height: 1.0*(to.y - from.y)))
+        rect_node.strokeColor = SKColor.blackColor()
+        rect_node.name = name
+        rect_node.position = CGPoint( x: 0.5*(from.x+to.x), y: 0.5*(from.y+to.y))
+        rect_node.setScale(1.0)
+        rect_node.zRotation = 0.0
+        rect_node.zPosition = zPos
+        return rect_node
+    }
+    func setDragRectNode() {
+        killDragRectNode()
+        self.drag_rect = createRectNode(self.sel_drag_from, to: self.sel_drag_to, name: "^drag_rect", zPos: 2.0)
+        self.drag_rect.lineWidth = 2.0
+        self.addChild(self.drag_rect)
+    }
+    func updateDragRectNode() {
+        if (self.is_sel_dragging)
+        {
+            setDragRectNode()
+        }
+        else
+        {
+            if (self.drag_rect.name == "^drag_rect")
+            {
+                killDragRectNode()
+            }
+        }
+    }
     override func mouseDown(evt: NSEvent) {
         self.last_evt_time = self.time; checkWake();
+        //self.mouse_is_down = true;
         if (evt.clickCount == 2) {
             killFcsNode()
             let dbl_sel = self.nodeAtPoint(evt.locationInNode(self))
@@ -717,9 +879,10 @@ class GameScene: SKScene {
     }
     override func mouseUp(evt: NSEvent) {
         self.last_evt_time = self.time; checkWake();
+        //self.mouse_is_down = false;
         self.drag_sel = SKNode()
         let node = self.nodeAtPoint(evt.locationInNode(self))
-        if (evt.modifierFlags & .ShiftKeyMask != nil) && isEntityNode(node) && isEntityNode(self.sel) {
+        if (evt.modifierFlags.intersect(.ShiftKeyMask) != []) && isEntityNode(node) && isEntityNode(self.sel) {
             let from = self.sel; let to = node;
             var found = false
             if let fent = self.entities_by_fn[from.name!] {
@@ -746,7 +909,7 @@ class GameScene: SKScene {
     override func update(currentTime: CFTimeInterval) {
         if (self.view!.paused == true) {return}
         self.time = currentTime; //checkWake();
-        for (i,cmd) in enumerate(self.deferred) {
+        for (i,cmd) in self.deferred.enumerate() {
             if (cmd == "killFcsNode") {
                 self.killFcsNode()
             }
